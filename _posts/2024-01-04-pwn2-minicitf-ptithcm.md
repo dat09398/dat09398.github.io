@@ -5,7 +5,6 @@ categories: [CTF, Binary Exploitation]
 tags: [pwn, ret2win, rop, stack-overflow, ptithcm]
 author: datious
 ---
-
 # Pwn2-MiniCTF-PTITHCM
 Author: D1n0_09_N24DCAT015
 
@@ -128,3 +127,4 @@ p.interactive()
 ```
 ![image](https://hackmd.io/_uploads/SJNTq_QxZg.png)
 Done!
+

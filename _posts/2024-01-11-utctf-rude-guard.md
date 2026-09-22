@@ -2,10 +2,9 @@
 title: "UTCTF - Rude Guard - Binary exploitation"
 date: 2024-01-11 00:00:00 +0700
 categories: [CTF, Binary Exploitation]
-tags: [pwn, ret2win, stack-overflow, argv, utctf]
+tags: [pwn, ret2win, stack-overflow, utctf]
 author: datious
 ---
-
 # UTCTF - Rude Guard - Binary exploitation
 Author: D1n0_09
 1. Sơ lược về chương trình
@@ -44,10 +43,10 @@ undefined8 read_input(int param_1)
   read(param_1,local_28,100);
   iVar1 = strcmp(local_28,"givemeflag\n");
   if (iVar1 == 0) {
-    puts("How rude! utflag{you're going to need a sneakier way in...}");
+    puts("How rude! utflag{you\'re going to need a sneakier way in...}");
   }
   else {
-    puts("I won't let you pass. No matter what.");
+    puts("I won\'t let you pass. No matter what.");
   }
   return 0;
 }

