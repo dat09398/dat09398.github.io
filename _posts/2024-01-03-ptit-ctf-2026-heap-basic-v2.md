@@ -104,7 +104,7 @@ fake _IO_2_1_stdout_ FILE object:
 
 3. Script
 solve.py
-```
+```python
 #!/usr/bin/python3
 from pwn import *
 
