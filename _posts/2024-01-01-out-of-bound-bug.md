@@ -4,16 +4,15 @@ date: 2024-01-01 00:00:00 +0700
 categories: [Binary Exploitation, Out-of-Bound]
 tags: [pwn, oob, heap, ghidra]
 author: datious
-description: "Analysis of an Out-of-Bound bug in a bank account management binary, exploiting negative index to access arbitrary memory."
 ---
 
 # OUT-OF-BOUND BUG
-**Author: D1n0_09**
-
+Author: D1n0_09
 This related to index in the array.
+```
 
-```c
 void main(EVP_PKEY_CTX *param_1)
+
 {
   int iVar1;
   void *pvVar2;
@@ -68,23 +67,5 @@ void main(EVP_PKEY_CTX *param_1)
       puts("You can have maximum 10 accounts");
     }
   }
-  /* WARNING: Subroutine does not return */
-  exit(0);
-}
-```
-
-## Vulnerability
-
-The program checks `index < 10` but **does NOT check for negative values**. Since `index` is declared as `int` (signed), the user can supply negative values. This allows accessing memory outside the `acc[]` array bounds — a classic Out-of-Bound (OOB) bug.
-
-- `acc + (long)index * 0x10` with a negative index will point to addresses **before** the `acc` array in the BSS segment.
-- This can be leveraged to read/write arbitrary global data, including GOT entries.
-
-## Exploitation
-
-By supplying a carefully crafted negative index, we can:
-1. Point to a GOT entry (e.g., `free@GOT` or `puts@GOT`)
-2. Overwrite it with a `one_gadget` or `system()` address
-3. Trigger the function call to get a shell
-
-> **Tip:** Calculate the negative index as: `index = (target_addr - acc_addr) / 0x10`
+                    /* WARNING: Subroutine does not return */
+  exi

